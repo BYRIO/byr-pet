@@ -1,17 +1,17 @@
-use twox_hash::XxHash64;
 use std::hash::Hasher;
+use twox_hash::XxHash64;
 
 fn hash_type<T>() -> String {
     let mut hasher = XxHash64::default();
     hasher.write(std::any::type_name::<T>().as_bytes());
     let hash = hasher.finish();
     let hash = hash.to_string();
-    (&hash[..15]).to_string()
+    hash[..15].to_string()
 }
 
 fn _save<T>(data: T, key: Option<&str>) -> anyhow::Result<()>
 where
-    T: serde::Serialize + for<'a> serde::de::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::de::Deserialize<'a>,
 {
     let mut storage = esp_idf_svc::nvs::EspNvs::new(
         esp_idf_svc::nvs::EspNvsPartition::<esp_idf_svc::nvs::NvsDefault>::take().unwrap(),
@@ -25,7 +25,7 @@ where
 
 fn _load<T>(key: Option<&str>) -> anyhow::Result<Option<T>>
 where
-    T: serde::Serialize + for<'a> serde::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::Deserialize<'a>,
 {
     match esp_idf_svc::nvs::EspNvs::new(
         esp_idf_svc::nvs::EspNvsPartition::<esp_idf_svc::nvs::NvsDefault>::take().unwrap(),
@@ -60,7 +60,7 @@ where
 
 fn _remove<T>(key: Option<&str>) -> anyhow::Result<bool>
 where
-    T: serde::Serialize + for<'a> serde::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::Deserialize<'a>,
 {
     let mut storage = esp_idf_svc::nvs::EspNvs::new(
         esp_idf_svc::nvs::EspNvsPartition::<esp_idf_svc::nvs::NvsDefault>::take().unwrap(),
@@ -73,7 +73,7 @@ where
 #[allow(dead_code)]
 pub fn load<T>() -> anyhow::Result<Option<T>>
 where
-    T: serde::Serialize + for<'a> serde::de::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::de::Deserialize<'a>,
 {
     _load(None)
 }
@@ -81,7 +81,7 @@ where
 #[allow(dead_code)]
 pub fn save<T>(data: T) -> anyhow::Result<()>
 where
-    T: serde::Serialize + for<'a> serde::de::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::de::Deserialize<'a>,
 {
     _save(data, None)
 }
@@ -89,7 +89,7 @@ where
 #[allow(dead_code)]
 pub fn load_from<T>(key: &str) -> anyhow::Result<Option<T>>
 where
-    T: serde::Serialize + for<'a> serde::de::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::de::Deserialize<'a>,
 {
     _load(Some(key))
 }
@@ -97,7 +97,7 @@ where
 #[allow(dead_code)]
 pub fn save_to<T>(data: T, key: &str) -> anyhow::Result<()>
 where
-    T: serde::Serialize + for<'a> serde::de::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::de::Deserialize<'a>,
 {
     _save(data, Some(key))
 }
@@ -105,7 +105,7 @@ where
 #[allow(dead_code)]
 pub fn remove<T>() -> anyhow::Result<bool>
 where
-    T: serde::Serialize + for<'a> serde::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::Deserialize<'a>,
 {
     _remove::<T>(None)
 }
@@ -113,7 +113,7 @@ where
 #[allow(dead_code)]
 pub fn remove_from<T>(key: &str) -> anyhow::Result<bool>
 where
-    T: serde::Serialize + for<'a> serde::Deserialize<'a> ,
+    T: serde::Serialize + for<'a> serde::Deserialize<'a>,
 {
     _remove::<T>(Some(key))
 }

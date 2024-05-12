@@ -1,14 +1,10 @@
-
 use anyhow::{bail, Result};
+use esp_idf_hal::delay;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::{
-        prelude::Peripherals,
-        peripheral
-    },
+    hal::{peripheral, prelude::Peripherals},
     wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
-use esp_idf_hal::delay;
 use log::info;
 use std::fmt;
 
@@ -118,8 +114,8 @@ pub fn connect() -> anyhow::Result<()> {
     let _wifi = connect_wifi(
         config,
         Peripherals::take()?.modem,
-        EspSystemEventLoop::take()?
+        EspSystemEventLoop::take()?,
     )?;
-    
+
     Ok(())
 }

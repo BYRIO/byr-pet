@@ -1,5 +1,5 @@
-mod nvs;
 mod net;
+mod nvs;
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
