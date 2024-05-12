@@ -1,36 +1,31 @@
+mod nvs;
 
-use anyhow;
-use esp_idf_svc;
-use storage;
-
-#[derive(storage::NvsStorage, serde::Serialize, serde::Deserialize, Debug, Default)]
-struct Bar {
+#[derive(serde::Serialize, serde::Deserialize, Debug, Default)]
+struct Foo {
     a: u32,
     b: f64,
     c: String,
 }
 
-
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    match Bar::load()? {
-        Some(bar) => {
-            log::info!("Data found: {:?}", bar);
-            log::info!("Removing data...");
-            Bar::remove()?;
-            log::info!("Data removed");
+    match nvs::load::<Foo>()? {
+        Some(data) => {
+            log::info!("Loaded data: {:?}", data);
+            nvs::remove::<Foo>()?;
+            log::info!("Removed data");
         }
         None => {
-            log::info!("No data found, saving default data...");
-            Bar {
+            log::info!("No data found");
+            let data = Foo {
                 a: 42,
                 b: 3.14,
-                c: "Hello, World!".to_string(),
-            }
-            .save()?;
-            log::info!("Data saved");
+                c: "Hello, NVS!".into(),
+            };
+            nvs::save(data)?;
+            log::info!("Saved data");
         }
     }
 
