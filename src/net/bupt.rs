@@ -1,7 +1,6 @@
 use anyhow::{bail, Result};
 use embedded_svc::http::{client::Client, Method};
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
-use log;
 use std::fmt;
 use urlencoding::encode;
 
@@ -49,8 +48,7 @@ fn check(url: impl AsRef<str>) -> Result<BuptNetStatus> {
         200..=399 => Ok(BuptNetStatus::NotAuthenticated(
             response
                 .header("Set-Cookie")
-                .map(|cookie| cookie.split(';').next().map(|cookie| cookie.to_string()))
-                .flatten(),
+                .and_then(|cookie| cookie.split(';').next().map(|cookie| cookie.to_string())),
         )),
         _ => fatal!("unexpected status code: {}", response.status()),
     }
@@ -98,8 +96,8 @@ fn auth(account: BuptAccount, cookie: String) -> Result<()> {
                 let reason = body.find("<div class=\"ui error message\">").map_or(
                     "Unknown error",
                     |start| {
-                        &body[start..].find("</div>").map_or("Unknown error", |end| {
-                            &body[(start + 30)..(start + end)].trim()
+                        body[start..].find("</div>").map_or("Unknown error", |end| {
+                            body[(start + 30)..(start + end)].trim()
                         })
                     },
                 );
