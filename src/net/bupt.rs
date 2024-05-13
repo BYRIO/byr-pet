@@ -38,7 +38,7 @@ enum BuptNetStatus {
 
 fn check(url: impl AsRef<str>) -> Result<BuptNetStatus> {
     log::debug!("checking bupt network status with url: {}", url.as_ref());
-    let connection = EspHttpConnection::new(&Configuration{
+    let connection = EspHttpConnection::new(&Configuration {
         follow_redirects_policy: FollowRedirectsPolicy::FollowNone,
         ..Default::default()
     })?;

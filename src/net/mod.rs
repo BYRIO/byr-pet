@@ -43,7 +43,10 @@ fn connect_wifi(
         match wifi.connect() {
             Ok(_) => break,
             Err(e) => {
-                log::warn!("Failed to connect wifi: {}, will retry after 10 seconds...", e);
+                log::warn!(
+                    "Failed to connect wifi: {}, will retry after 10 seconds...",
+                    e
+                );
             }
         }
         delay.delay_ms(1000 * 10);
@@ -66,7 +69,10 @@ fn connect_wifi(
             match bupt::login(account.clone()) {
                 Ok(_) => break,
                 Err(e) => {
-                    log::warn!("Failed to login to BUPT-portal: {}, will retry after 10 seconds...", e);
+                    log::warn!(
+                        "Failed to login to BUPT-portal: {}, will retry after 10 seconds...",
+                        e
+                    );
                 }
             }
             delay.delay_ms(1000 * 10);
@@ -124,7 +130,10 @@ pub fn connect() -> anyhow::Result<()> {
         EspSystemEventLoop::take()?,
     )?;
 
-    log::info!("Web Test: {}", bupt::get("http://www.msftconnecttest.com/connecttest.txt")?);
+    log::info!(
+        "Web Test: {}",
+        bupt::get("http://www.msftconnecttest.com/connecttest.txt")?
+    );
 
     Ok(())
 }
