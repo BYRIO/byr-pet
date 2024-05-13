@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use embedded_svc::http::{client::Client, Method};
-use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
+use esp_idf_svc::http::client::{Configuration, EspHttpConnection, FollowRedirectsPolicy};
 use std::fmt;
 use urlencoding::encode;
 
@@ -38,14 +38,27 @@ enum BuptNetStatus {
 
 fn check(url: impl AsRef<str>) -> Result<BuptNetStatus> {
     log::debug!("checking bupt network status with url: {}", url.as_ref());
-    let connection = EspHttpConnection::new(&Configuration::default())?;
+    let connection = EspHttpConnection::new(&Configuration{
+        follow_redirects_policy: FollowRedirectsPolicy::FollowNone,
+        ..Default::default()
+    })?;
     let mut client = Client::wrap(connection);
     let request = client.request(Method::Get, url.as_ref(), &[])?;
     let response = request.submit()?;
     log::debug!("response status: {}", response.status());
     match response.status() {
+        // Logged in, not redirected
         204 => Ok(BuptNetStatus::Authenticated),
-        200..=399 => Ok(BuptNetStatus::NotAuthenticated(
+        // Redirect to login page
+        302 => {
+            let location = response
+                .header("Location")
+                .ok_or_else(|| anyhow::anyhow!("no Location header found in response"))?;
+            log::info!("redirected to: {}", location);
+            check(location)
+        }
+        // Redirected to login page
+        200 => Ok(BuptNetStatus::NotAuthenticated(
             response
                 .header("Set-Cookie")
                 .and_then(|cookie| cookie.split(';').next().map(|cookie| cookie.to_string())),
@@ -64,7 +77,7 @@ fn auth(account: BuptAccount, cookie: String) -> Result<()> {
     let mut request = client.request(Method::Post, "http://10.3.8.216/login", &headers)?;
     request.write(
         format!(
-            "username={}&password={}",
+            "user={}&pass={}",
             encode(&account.username),
             encode(&account.password)
         )
@@ -73,6 +86,12 @@ fn auth(account: BuptAccount, cookie: String) -> Result<()> {
     let mut response = request.submit()?;
     log::debug!("response status: {}", response.status());
     match response.status() {
+        302 => {
+            let location = response
+                .header("Location")
+                .ok_or_else(|| anyhow::anyhow!("no Location header found in response"))?;
+            fatal!("unexpected redirect: {}", location)
+        }
         200 => match check(CHECK_URL)? {
             BuptNetStatus::Authenticated => {
                 log::info!("BUPT-portal authenticated successfully");
@@ -109,6 +128,7 @@ fn auth(account: BuptAccount, cookie: String) -> Result<()> {
 }
 
 pub fn login(account: BuptAccount) -> Result<()> {
+    log::info!("Checking BUPT-portal status...");
     match check(CHECK_URL) {
         Ok(BuptNetStatus::Authenticated) => {
             log::info!("BUPT-portal is already authenticated");
@@ -138,8 +158,7 @@ pub fn login(account: BuptAccount) -> Result<()> {
     }
 }
 
-#[allow(dead_code)]
-fn get(url: impl AsRef<str>) -> Result<String> {
+pub fn get(url: impl AsRef<str>) -> Result<String> {
     let connection = EspHttpConnection::new(&Configuration::default())?;
     let mut client = Client::wrap(connection);
     let request = client.request(Method::Get, url.as_ref(), &[])?;

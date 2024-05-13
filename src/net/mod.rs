@@ -8,7 +8,6 @@ use esp_idf_svc::{
     log::set_target_level,
     wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
-use log::info;
 use std::fmt;
 
 fn connect_wifi(
@@ -35,34 +34,50 @@ fn connect_wifi(
         ..Default::default()
     }))?;
 
-    info!("Starting wifi...");
+    log::info!("Starting wifi...");
     wifi.start()?;
-    info!("Connecting wifi {}...", ssid);
+    log::info!("Connecting wifi {}...", ssid);
     let delay: delay::Delay = Default::default();
 
     for retry in 0..10 {
         match wifi.connect() {
             Ok(_) => break,
             Err(e) => {
-                info!("Failed to connect: {}, retrying...", e);
+                log::warn!("Failed to connect wifi: {}, will retry after 10 seconds...", e);
             }
         }
         delay.delay_ms(1000 * 10);
         if retry == 9 {
+            log::error!("Retry limit exceeded");
             bail!("Failed to connect to wifi");
+        } else {
+            log::info!("Retrying...");
         }
     }
 
-    info!("Waiting for DHCP lease...");
+    log::info!("Waiting for DHCP lease...");
     wifi.wait_netif_up()?;
 
     let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
-    info!("Wifi DHCP info: {:?}", ip_info);
+    log::info!("Wifi DHCP info: {:?}", ip_info);
 
     if let Some(account) = bupt_account {
-        bupt::login(account)?;
+        for retry in 0..10 {
+            match bupt::login(account.clone()) {
+                Ok(_) => break,
+                Err(e) => {
+                    log::warn!("Failed to login to BUPT-portal: {}, will retry after 10 seconds...", e);
+                }
+            }
+            delay.delay_ms(1000 * 10);
+            if retry == 9 {
+                log::error!("Retry limit exceeded");
+                bail!("Failed to login to BUPT-portal");
+            } else {
+                log::info!("Retrying...");
+            }
+        }
     }
-
     Ok(Box::new(esp_wifi))
 }
 
@@ -108,6 +123,8 @@ pub fn connect() -> anyhow::Result<()> {
         Peripherals::take()?.modem,
         EspSystemEventLoop::take()?,
     )?;
+
+    log::info!("Web Test: {}", bupt::get("http://www.msftconnecttest.com/connecttest.txt")?);
 
     Ok(())
 }
