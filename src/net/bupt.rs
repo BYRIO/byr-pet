@@ -157,23 +157,3 @@ pub fn login(account: BuptAccount) -> Result<()> {
         Err(e) => fatal!("BUPT-portal status check failed: {}", e),
     }
 }
-
-pub fn get(url: impl AsRef<str>) -> Result<String> {
-    let connection = EspHttpConnection::new(&Configuration::default())?;
-    let mut client = Client::wrap(connection);
-    let request = client.request(Method::Get, url.as_ref(), &[])?;
-    let mut response = request.submit()?;
-    let mut body: Vec<u8> = Vec::new();
-    loop {
-        let mut buffer = [0u8; 1024];
-        if let Ok(size) = response.read(&mut buffer) {
-            if size == 0 {
-                break;
-            }
-            body.extend_from_slice(&buffer[..size]);
-        } else {
-            break;
-        }
-    }
-    Ok(String::from_utf8(body).unwrap_or_else(|_| "".to_string()))
-}

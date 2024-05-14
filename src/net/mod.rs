@@ -1,4 +1,5 @@
 mod bupt;
+mod provisioning;
 
 use anyhow::{bail, Result};
 use esp_idf_hal::delay;
@@ -6,15 +7,17 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{peripheral, prelude::Peripherals},
     log::set_target_level,
+    nvs::EspDefaultNvsPartition,
     wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
 use std::fmt;
 
-fn connect_wifi(
+fn connect_wifi_with_config(
     config: NetConfig,
     modem: impl peripheral::Peripheral<P = esp_idf_svc::hal::modem::Modem> + 'static,
     sysloop: EspSystemEventLoop,
 ) -> Result<Box<EspWifi<'static>>> {
+    let nvs = EspDefaultNvsPartition::take()?;
     let mut bupt_account = None;
     let (auth_method, ssid, pass) = match config {
         NetConfig::BuptPortal(account) => {
@@ -23,7 +26,7 @@ fn connect_wifi(
         }
         NetConfig::NormalWifi(wifi) => (AuthMethod::WPA2Personal, wifi.ssid, wifi.password),
     };
-    let mut esp_wifi = EspWifi::new(modem, sysloop.clone(), None)?;
+    let mut esp_wifi = EspWifi::new(modem, sysloop.clone(), Some(nvs))?;
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sysloop)?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
@@ -110,30 +113,22 @@ enum NetConfig {
     NormalWifi(Wifi),
 }
 
-pub fn connect() -> anyhow::Result<()> {
+pub fn connect() -> Result<Box<EspWifi<'static>>> {
     set_target_level("wifi", log::LevelFilter::Warn)?;
     set_target_level("wifi_init", log::LevelFilter::Warn)?;
 
-    let config: NetConfig = match crate::nvs::load::<NetConfig>()? {
+    match crate::nvs::load::<NetConfig>()? {
         Some(config) => {
             log::info!("Loaded NetConfig: {:?}", &config);
-            config
+            connect_wifi_with_config(
+                config,
+                Peripherals::take()?.modem,
+                EspSystemEventLoop::take()?,
+            )
         }
         None => {
-            unimplemented!()
+            provisioning::main()?;
+            bail!("unimplemented")
         }
-    };
-
-    let _wifi = connect_wifi(
-        config,
-        Peripherals::take()?.modem,
-        EspSystemEventLoop::take()?,
-    )?;
-
-    log::info!(
-        "Web Test: {}",
-        bupt::get("http://www.msftconnecttest.com/connecttest.txt")?
-    );
-
-    Ok(())
+    }
 }
