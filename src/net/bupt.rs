@@ -14,8 +14,8 @@ macro_rules! fatal {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct BuptAccount {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
 }
 
 impl fmt::Debug for BuptAccount {

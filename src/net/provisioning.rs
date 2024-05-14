@@ -6,18 +6,19 @@ use std::{
     time::Duration,
 };
 
-use embedded_svc::{
-    http::{Headers, Method},
-    io::Write,
-    wifi::{self, AccessPointConfiguration, AuthMethod},
-};
+use embedded_svc::http::Headers;
 
+use esp_idf_hal::delay;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     http::server::EspHttpServer,
+    http::Method,
+    io::Write,
     ipv4::{Mask, Subnet},
     nvs::EspDefaultNvsPartition,
-    wifi::{BlockingWifi, EspWifi},
+    wifi::{
+        self, AccessPointConfiguration, AuthMethod, BlockingWifi, ClientConfiguration, EspWifi,
+    },
 };
 use esp_idf_svc::{
     hal::prelude::Peripherals,
@@ -34,9 +35,8 @@ const CHANNEL: u8 = 11;
 
 const IP: Ipv4Addr = Ipv4Addr::new(192, 168, 71, 1);
 
-pub fn main() -> anyhow::Result<()> {
-    let wifi = setup_ap();
-    std::mem::forget(wifi);
+pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
+    let wifi = setup_ap()?;
 
     let mut dns = DnsServer::new(IP);
     dns.start()?;
@@ -76,7 +76,7 @@ pub fn main() -> anyhow::Result<()> {
     core::mem::forget(http);
     core::mem::forget(dns);
 
-    Ok(())
+    Ok(wifi)
 }
 
 fn setup_ap() -> anyhow::Result<Box<EspWifi<'static>>> {
@@ -105,17 +105,45 @@ fn setup_ap() -> anyhow::Result<Box<EspWifi<'static>>> {
 
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sys_loop)?;
 
-    let wifi_configuration = wifi::Configuration::AccessPoint(AccessPointConfiguration {
-        ssid: SSID.try_into().unwrap(),
-        auth_method: AuthMethod::None,
-        password: "".try_into().unwrap(),
-        channel: CHANNEL,
-        ..Default::default()
-    });
+    let wifi_configuration = wifi::Configuration::Mixed(
+        ClientConfiguration {
+            ssid: heapless::String::<32>::try_from("BUPT-portal").unwrap(),
+            auth_method: AuthMethod::None,
+            ..Default::default()
+        },
+        AccessPointConfiguration {
+            ssid: SSID.try_into().unwrap(),
+            auth_method: AuthMethod::None,
+            channel: CHANNEL,
+            ..Default::default()
+        },
+    );
     wifi.set_configuration(&wifi_configuration)?;
     wifi.start()?;
+
+    let delay: delay::Delay = Default::default();
+    for retry in 0..10 {
+        match wifi.connect() {
+            Ok(_) => break,
+            Err(e) => {
+                log::warn!(
+                    "Failed to connect wifi: {}, will retry after 10 seconds...",
+                    e
+                );
+            }
+        }
+        delay.delay_ms(1000 * 10);
+        if retry == 9 {
+            log::error!("Retry limit exceeded");
+            anyhow::bail!("Failed to connect to wifi");
+        } else {
+            log::info!("Retrying...");
+        }
+    }
     wifi.wait_netif_up()?;
 
+    let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
+    log::info!("Connected to BUPT-portal: {:?}", ip_info);
     info!("Created Wi-Fi with WIFI_SSID `{}`", SSID);
 
     Ok(Box::new(esp_wifi))

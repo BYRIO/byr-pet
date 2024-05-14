@@ -126,9 +126,6 @@ pub fn connect() -> Result<Box<EspWifi<'static>>> {
                 EspSystemEventLoop::take()?,
             )
         }
-        None => {
-            provisioning::main()?;
-            bail!("unimplemented")
-        }
+        None => provisioning::main(),
     }
 }
