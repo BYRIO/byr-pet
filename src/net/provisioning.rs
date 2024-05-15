@@ -1,7 +1,7 @@
 use core::convert::TryInto;
 use std::{
     net::{Ipv4Addr, UdpSocket},
-    sync::mpsc,
+    sync::{mpsc, Arc, Condvar, Mutex},
     thread,
     time::Duration,
 };
@@ -11,8 +11,7 @@ use embedded_svc::http::Headers;
 use esp_idf_hal::delay;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    http::server::EspHttpServer,
-    http::Method,
+    http::{server::EspHttpServer, Method},
     io::Write,
     ipv4::{Mask, Subnet},
     nvs::EspDefaultNvsPartition,
@@ -47,6 +46,10 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
         ..Default::default()
     })?;
 
+    // Here we use a counter to simulate the provisioning process
+    let count = Arc::new((Mutex::new(0), Condvar::new()));
+    let count1 = Arc::clone(&count);
+
     http.fn_handler::<anyhow::Error, _>("/", Method::Get, move |req| {
         log::info!("HTTP GET {}{}", req.host().unwrap_or("Unknown"), req.uri());
         if req.host() != Some(format!("{}", IP).as_str()) {
@@ -56,8 +59,30 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
                 &[("Location", format!("http://{}/", IP).as_str())],
             )?;
         } else {
+            let (lock, cvar) = &*count1;
+            let mut counter = lock.lock().unwrap();
+            *counter += 1;
+            if *counter >= 10 {
+                cvar.notify_all();
+            } else {
+                log::info!("Counter: {}/10, refresh the page to continue", *counter);
+            }
             req.into_ok_response()?.write_all(
-                "<DOCTYPE html><html><body><h1>Welcome to BYR-pet</h1></body></html>".as_bytes(),
+                format!(
+                    "<DOCTYPE html>
+                <html>
+                    <head>
+                        <title>BYR-pet</title>
+                        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+                    </head>
+                    <body>
+                        <h1>Welcome to BYR-pet</h1>
+                        <p>Count: {}/10</p>
+                    </body>
+                </html>",
+                    *counter
+                )
+                .as_bytes(),
             )?
         }
         Ok(())
@@ -73,8 +98,11 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
         Ok(())
     })?;
 
-    core::mem::forget(http);
-    core::mem::forget(dns);
+    log::info!("Now visit http://{} 10 times to continue", IP);
+    let (lock, cvar) = &*count;
+    let counter = lock.lock().unwrap();
+    let _c = cvar.wait(counter).unwrap();
+    log::info!("Count reached 10");
 
     Ok(wifi)
 }
