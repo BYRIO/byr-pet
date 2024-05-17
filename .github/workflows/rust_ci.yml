@@ -34,7 +34,7 @@ jobs:
           default: true
           buildtargets: esp32s3
           ldproxy: true
-      - name: Setup Node and pnpm
+      - name: Setup node and pnpm
         if: matrix.action.command != 'fmt'
         uses: pnpm/action-setup@v4
         with:
