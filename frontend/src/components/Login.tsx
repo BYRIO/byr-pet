@@ -11,7 +11,7 @@ export default function Component() {
                             输入学号和校园网密码以连接 BUPT-portal
                         </p>
                     </div>
-                    <form className="space-y-6">
+                    <form className="space-y-6" action="/login" method="post">
                         <div>
                             <label
                                 htmlFor="username"

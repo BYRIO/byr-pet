@@ -11,7 +11,10 @@ use embedded_svc::http::Headers;
 use esp_idf_hal::delay;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    http::{server::EspHttpServer, Method},
+    http::{
+        server::{EspHttpConnection, EspHttpServer, Request},
+        Method,
+    },
     io::Write,
     ipv4::{Mask, Subnet},
     nvs::EspDefaultNvsPartition,
@@ -25,7 +28,11 @@ use esp_idf_svc::{
     netif::{EspNetif, NetifConfiguration, NetifStack},
 };
 
+use include_dir::{include_dir, Dir};
+
 use log::*;
+
+static FRONTEND: Dir = include_dir!("$OUT_DIR/frontend");
 
 const STACK_SIZE: usize = 10240;
 const SSID: &str = "BYR-pet";
@@ -33,6 +40,28 @@ const SSID: &str = "BYR-pet";
 const CHANNEL: u8 = 11;
 
 const IP: Ipv4Addr = Ipv4Addr::new(192, 168, 71, 1);
+const IP_STRING: &str = "192.168.71.1";
+
+const MIME_TYPES: &[(&str, &str)] = &[
+    ("html", "text/html"),
+    ("js", "application/javascript"),
+    ("css", "text/css"),
+];
+
+fn read_body_to_string(req: &mut Request<&mut EspHttpConnection>) -> anyhow::Result<String> {
+    let mut body = Vec::new();
+    let mut buffer = [0; 4096];
+
+    loop {
+        let bytes_read = req.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        body.extend_from_slice(&buffer[..bytes_read]);
+    }
+
+    Ok(String::from_utf8(body)?)
+}
 
 pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
     let wifi = setup_ap()?;
@@ -47,62 +76,101 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
     })?;
 
     // Here we use a counter to simulate the provisioning process
-    let count = Arc::new((Mutex::new(0), Condvar::new()));
-    let count1 = Arc::clone(&count);
+    let semaphore = Arc::new((Mutex::new(()), Condvar::new()));
+    let semaphore1 = Arc::clone(&semaphore);
 
-    http.fn_handler::<anyhow::Error, _>("/", Method::Get, move |req| {
-        log::info!("HTTP GET {}{}", req.host().unwrap_or("Unknown"), req.uri());
-        if req.host() != Some(format!("{}", IP).as_str()) {
+    fn check_host_and_log<'a, 'b>(
+        req: Request<&'a mut EspHttpConnection<'b>>,
+    ) -> anyhow::Result<Option<Request<&'a mut EspHttpConnection<'b>>>> {
+        log::info!(
+            "HTTP {:?} - {}{}",
+            req.method(),
+            req.host().unwrap_or("Unknown"),
+            req.uri()
+        );
+        if req.host() != Some(IP_STRING) {
             req.into_response(
                 302,
                 None,
-                &[("Location", format!("http://{}/", IP).as_str())],
+                &[("Location", format!("http://{}/", IP_STRING).as_str())],
             )?;
-        } else {
-            let (lock, cvar) = &*count1;
-            let mut counter = lock.lock().unwrap();
-            *counter += 1;
-            if *counter >= 10 {
+            return Ok(None);
+        }
+        Ok(Some(req))
+    }
+
+    http.fn_handler::<anyhow::Error, _>("/", Method::Get, move |req| {
+        if let Some(req) = check_host_and_log(req)? {
+            match FRONTEND.get_file("index.html") {
+                Some(file) => {
+                    req.into_response(200, None, &[("Content-Type", "text/html")])?
+                        .write_all(file.contents())?;
+                }
+                None => {
+                    req.into_response(404, None, &[])?;
+                }
+            }
+        }
+        Ok(())
+    })?;
+
+    http.fn_handler::<anyhow::Error, _>("/login", Method::Post, move |req| {
+        if let Some(mut req) = check_host_and_log(req)? {
+            let body = read_body_to_string(&mut req)?;
+            let body = urlencoding::decode(&body)?;
+
+            if req.header("Content-Type") == Some("application/x-www-form-urlencoded") {
+                let mut username = None;
+                let mut password = None;
+                for pair in body.split('&') {
+                    let mut pair = pair.split('=');
+                    let key = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
+                    let value = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
+                    match key {
+                        "username" => username = Some(value),
+                        "password" => password = Some(value),
+                        _ => {}
+                    }
+                }
+                log::info!(
+                    "Login: username = {:?}, password = {:?}",
+                    username,
+                    password
+                );
+                let (_lock, cvar) = &*semaphore1;
                 cvar.notify_all();
             } else {
-                log::info!("Counter: {}/10, refresh the page to continue", *counter);
+                log::info!("Invalid Content-Type");
+                req.into_response(400, None, &[])?;
             }
-            req.into_ok_response()?.write_all(
-                format!(
-                    "<DOCTYPE html>
-                <html>
-                    <head>
-                        <title>BYR-pet</title>
-                        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-                    </head>
-                    <body>
-                        <h1>Welcome to BYR-pet</h1>
-                        <p>Count: {}/10</p>
-                    </body>
-                </html>",
-                    *counter
-                )
-                .as_bytes(),
-            )?
         }
         Ok(())
     })?;
 
     http.fn_handler::<anyhow::Error, _>("*", Method::Get, |req| {
-        log::info!("HTTP GET {}{}", req.host().unwrap_or("Unknown"), req.uri());
-        req.into_response(
-            302,
-            None,
-            &[("Location", format!("http://{}/", IP).as_str())],
-        )?;
+        if let Some(req) = check_host_and_log(req)? {
+            match FRONTEND.get_file(req.uri().trim_start_matches('/')) {
+                Some(file) => {
+                    let ext = req.uri().split('.').last().unwrap_or("");
+                    let mime = MIME_TYPES
+                        .iter()
+                        .find(|(ext_, _)| ext == *ext_)
+                        .map(|(_, mime)| *mime)
+                        .unwrap_or("application/octet-stream");
+                    req.into_response(200, None, &[("Content-Type", mime)])?
+                        .write_all(file.contents())?;
+                }
+                None => {
+                    req.into_response(404, None, &[])?;
+                }
+            }
+        }
         Ok(())
     })?;
 
-    log::info!("Now visit http://{} 10 times to continue", IP);
-    let (lock, cvar) = &*count;
-    let counter = lock.lock().unwrap();
-    let _c = cvar.wait(counter).unwrap();
-    log::info!("Count reached 10");
+    log::info!("Now visit http://{} to login", IP);
+    let (lock, cvar) = &*semaphore;
+    drop(cvar.wait(lock.lock().unwrap()).unwrap());
 
     Ok(wifi)
 }
