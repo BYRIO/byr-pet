@@ -1,7 +1,11 @@
+import Loading from "../assets/loading.svg"
+import { useState } from "preact/hooks"
+
 export default function Component() {
+    const [loading, setLoading] = useState(false)
     return (
         <>
-            <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 px-4 py-12 dark:bg-gray-950">
+            <div className="min-h-[75vh] flex flex-col items-center justify-center px-4 py-12">
                 <div className="w-full max-w-md space-y-8">
                     <div className="text-center">
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
@@ -51,9 +55,11 @@ export default function Component() {
                         <div>
                             <button
                                 type="submit"
-                                className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:bg-indigo-500 dark:hover:bg-indigo-600 dark:focus:ring-indigo-600"
+                                disabled={loading}
+                                className="flex w-full justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:bg-indigo-500 dark:hover:bg-indigo-600 dark:focus:ring-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                连接 BUPT-portal
+                                { loading && <img src={Loading} className="w-5 h-5 mr-2 animate-spin" alt="loading" /> }
+                                { loading ? "登录中..." : "连接 BUPT-portal" }
                             </button>
                         </div>
                     </form>
