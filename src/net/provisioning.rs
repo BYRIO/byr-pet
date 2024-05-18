@@ -6,6 +6,8 @@ use std::{
     time::Duration,
 };
 
+use serde_json::json;
+
 use embedded_svc::http::Headers;
 
 use esp_idf_hal::delay;
@@ -31,6 +33,8 @@ use esp_idf_svc::{
 use include_dir::{include_dir, Dir};
 
 use log::*;
+
+use crate::net::bupt;
 
 static FRONTEND: Dir = include_dir!("$OUT_DIR/frontend");
 
@@ -63,6 +67,26 @@ fn read_body_to_string(req: &mut Request<&mut EspHttpConnection>) -> anyhow::Res
     Ok(String::from_utf8(body)?)
 }
 
+fn check_host_and_log<'a, 'b>(
+    req: Request<&'a mut EspHttpConnection<'b>>,
+) -> anyhow::Result<Option<Request<&'a mut EspHttpConnection<'b>>>> {
+    log::info!(
+        "HTTP {:?} - {}{}",
+        req.method(),
+        req.host().unwrap_or("Unknown"),
+        req.uri()
+    );
+    if req.host() != Some(IP_STRING) {
+        req.into_response(
+            302,
+            None,
+            &[("Location", format!("http://{}/", IP_STRING).as_str())],
+        )?;
+        return Ok(None);
+    }
+    Ok(Some(req))
+}
+
 pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
     let wifi = setup_ap()?;
 
@@ -75,31 +99,10 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
         ..Default::default()
     })?;
 
-    // Here we use a counter to simulate the provisioning process
     let semaphore = Arc::new((Mutex::new(()), Condvar::new()));
     let semaphore1 = Arc::clone(&semaphore);
 
-    fn check_host_and_log<'a, 'b>(
-        req: Request<&'a mut EspHttpConnection<'b>>,
-    ) -> anyhow::Result<Option<Request<&'a mut EspHttpConnection<'b>>>> {
-        log::info!(
-            "HTTP {:?} - {}{}",
-            req.method(),
-            req.host().unwrap_or("Unknown"),
-            req.uri()
-        );
-        if req.host() != Some(IP_STRING) {
-            req.into_response(
-                302,
-                None,
-                &[("Location", format!("http://{}/", IP_STRING).as_str())],
-            )?;
-            return Ok(None);
-        }
-        Ok(Some(req))
-    }
-
-    http.fn_handler::<anyhow::Error, _>("/", Method::Get, move |req| {
+    http.fn_handler::<anyhow::Error, _>("/", Method::Get, |req| {
         if let Some(req) = check_host_and_log(req)? {
             match FRONTEND.get_file("index.html") {
                 Some(file) => {
@@ -117,7 +120,6 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
     http.fn_handler::<anyhow::Error, _>("/login", Method::Post, move |req| {
         if let Some(mut req) = check_host_and_log(req)? {
             let body = read_body_to_string(&mut req)?;
-            let body = urlencoding::decode(&body)?;
 
             if req.header("Content-Type") == Some("application/x-www-form-urlencoded") {
                 let mut username = None;
@@ -126,19 +128,36 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
                     let mut pair = pair.split('=');
                     let key = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
                     let value = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
-                    match key {
+                    let key = urlencoding::decode(key)?;
+                    let value = urlencoding::decode(value)?;
+                    match key.as_ref() {
                         "username" => username = Some(value),
                         "password" => password = Some(value),
                         _ => {}
                     }
                 }
-                log::info!(
-                    "Login: username = {:?}, password = {:?}",
-                    username,
-                    password
-                );
-                let (_lock, cvar) = &*semaphore1;
-                cvar.notify_all();
+                match bupt::login(bupt::BuptAccount {
+                    username: username
+                        .ok_or(anyhow::anyhow!("Missing username"))?
+                        .to_string(),
+                    password: password
+                        .ok_or(anyhow::anyhow!("Missing password"))?
+                        .to_string(),
+                }) {
+                    Ok(_) => {
+                        req.into_ok_response()?
+                            .write_all(json!({"code": 0}).to_string().as_bytes())?;
+                        let (_lock, cvar) = &*semaphore1;
+                        cvar.notify_all();
+                    }
+                    Err(e) => {
+                        req.into_ok_response()?.write_all(
+                            json!({"code": 1, "message": e.to_string()})
+                                .to_string()
+                                .as_bytes(),
+                        )?;
+                    }
+                }
             } else {
                 log::info!("Invalid Content-Type");
                 req.into_response(400, None, &[])?;
