@@ -1,4 +1,6 @@
+use lazy_static::lazy_static;
 use std::hash::Hasher;
+use std::sync::Mutex;
 use twox_hash::XxHash64;
 
 fn hash_type<T>() -> String {
@@ -9,17 +11,27 @@ fn hash_type<T>() -> String {
     hash[..15].to_string()
 }
 
+lazy_static! {
+    pub static ref GLOBAL_NVS: Mutex<esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsDefault>> = {
+        let nvs = esp_idf_svc::nvs::EspNvsPartition::<esp_idf_svc::nvs::NvsDefault>::take()
+            .expect("Failed to take default NVS partition");
+        Mutex::new(nvs)
+    };
+}
+
+pub fn nvs() -> esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsDefault> {
+    GLOBAL_NVS.lock().unwrap().clone()
+}
+
 fn _save<T>(data: T, key: Option<&str>) -> anyhow::Result<()>
 where
     T: serde::Serialize + for<'a> serde::de::Deserialize<'a>,
 {
-    let mut storage = esp_idf_svc::nvs::EspNvs::new(
-        esp_idf_svc::nvs::EspNvsPartition::<esp_idf_svc::nvs::NvsDefault>::take().unwrap(),
-        &hash_type::<T>(),
-        true,
-    )?;
+    let namespace = hash_type::<T>();
+    let key = key.unwrap_or("__default");
+    let mut storage = esp_idf_svc::nvs::EspNvs::new(nvs(), &namespace, true)?;
     let encoded = bincode::serialize(&data)?;
-    storage.set_blob(key.unwrap_or("__default"), &encoded)?;
+    storage.set_blob(key, &encoded)?;
     Ok(())
 }
 
@@ -27,11 +39,8 @@ fn _load<T>(key: Option<&str>) -> anyhow::Result<Option<T>>
 where
     T: serde::Serialize + for<'a> serde::Deserialize<'a>,
 {
-    match esp_idf_svc::nvs::EspNvs::new(
-        esp_idf_svc::nvs::EspNvsPartition::<esp_idf_svc::nvs::NvsDefault>::take().unwrap(),
-        &hash_type::<T>(),
-        false,
-    ) {
+    let namespace = hash_type::<T>();
+    match esp_idf_svc::nvs::EspNvs::new(nvs(), &namespace, false) {
         Ok(storage) => {
             let key = key.unwrap_or("__default");
             match storage.blob_len(key)? {

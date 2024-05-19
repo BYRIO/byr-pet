@@ -7,7 +7,6 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{peripheral, prelude::Peripherals},
     log::set_target_level,
-    nvs::EspDefaultNvsPartition,
     wifi::{AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
 use std::fmt;
@@ -17,7 +16,7 @@ fn connect_wifi_with_config(
     modem: impl peripheral::Peripheral<P = esp_idf_svc::hal::modem::Modem> + 'static,
     sysloop: EspSystemEventLoop,
 ) -> Result<Box<EspWifi<'static>>> {
-    let nvs = EspDefaultNvsPartition::take()?;
+    let nvs = crate::nvs::nvs();
     let mut bupt_account = None;
     let (auth_method, ssid, pass) = match config {
         NetConfig::BuptPortal(account) => {
@@ -82,7 +81,7 @@ fn connect_wifi_with_config(
 
     if let Some(account) = bupt_account {
         for retry in 0..10 {
-            match bupt::login(account.clone()) {
+            match bupt::login(&account) {
                 Ok(_) => break,
                 Err(e) => {
                     log::warn!(

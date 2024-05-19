@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use embedded_svc::http::{client::Client, Method};
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection, FollowRedirectsPolicy};
-use std::fmt;
+use std::{fmt, time::Duration};
 use urlencoding::encode;
 
 macro_rules! fatal {
@@ -40,6 +40,7 @@ fn check(url: impl AsRef<str>) -> Result<BuptNetStatus> {
     log::debug!("checking bupt network status with url: {}", url.as_ref());
     let connection = EspHttpConnection::new(&Configuration {
         follow_redirects_policy: FollowRedirectsPolicy::FollowNone,
+        timeout: Some(Duration::from_secs(20)),
         ..Default::default()
     })?;
     let mut client = Client::wrap(connection);
@@ -67,7 +68,7 @@ fn check(url: impl AsRef<str>) -> Result<BuptNetStatus> {
     }
 }
 
-fn auth(account: BuptAccount, cookie: String) -> Result<()> {
+fn auth(account: &BuptAccount, cookie: String) -> Result<()> {
     let connection = EspHttpConnection::new(&Configuration::default())?;
     let mut client = Client::wrap(connection);
     let headers = [
@@ -127,7 +128,7 @@ fn auth(account: BuptAccount, cookie: String) -> Result<()> {
     }
 }
 
-pub fn login(account: BuptAccount) -> Result<()> {
+pub fn login(account: &BuptAccount) -> Result<()> {
     log::info!("Checking BUPT-portal status...");
     match check(CHECK_URL) {
         Ok(BuptNetStatus::Authenticated) => {

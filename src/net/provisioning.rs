@@ -22,7 +22,6 @@ use esp_idf_svc::{
     ipv4::{self, RouterConfiguration},
     ipv4::{Mask, Subnet},
     netif::{EspNetif, NetifConfiguration, NetifStack},
-    nvs::EspDefaultNvsPartition,
     wifi::{
         self, AccessPointConfiguration, AuthMethod, BlockingWifi, ClientConfiguration, EspWifi,
     },
@@ -134,18 +133,23 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
                         _ => {}
                     }
                 }
-                match bupt::login(bupt::BuptAccount {
+                let config = bupt::BuptAccount {
                     username: username
                         .ok_or(anyhow::anyhow!("Missing username"))?
                         .to_string(),
                     password: password
                         .ok_or(anyhow::anyhow!("Missing password"))?
                         .to_string(),
-                }) {
+                };
+                match bupt::login(&config) {
                     Ok(_) => {
                         req.into_ok_response()?
                             .write_all(json!({"code": 0}).to_string().as_bytes())?;
                         let (_lock, cvar) = &*semaphore1;
+                        crate::nvs::save(super::NetConfig::BuptPortal(config)).map_err(|x| {
+                            log::error!("Failed to save account: {:?} / {}", x, x);
+                            x
+                        })?;
                         cvar.notify_all();
                     }
                     Err(e) => {
@@ -195,7 +199,7 @@ pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
 fn setup_ap() -> anyhow::Result<Box<EspWifi<'static>>> {
     let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
-    let nvs = EspDefaultNvsPartition::take()?;
+    let nvs = crate::nvs::nvs();
 
     let mut esp_wifi = EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?;
 
