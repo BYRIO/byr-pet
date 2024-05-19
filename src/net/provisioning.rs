@@ -84,116 +84,141 @@ fn check_host_and_log<'a, 'b>(
     Ok(Some(req))
 }
 
-pub fn main() -> anyhow::Result<Box<EspWifi<'static>>> {
-    let wifi = setup_ap()?;
+pub struct Provisioner {
+    pub wifi: Box<EspWifi<'static>>,
+    finished: Arc<(Mutex<bool>, Condvar)>,
+    #[allow(dead_code)]
+    dns: DnsServer,
+    #[allow(dead_code)]
+    http: EspHttpServer<'static>,
+}
 
-    let mut dns = DnsServer::new(IP);
-    dns.start()?;
+impl Provisioner {
+    pub fn new() -> anyhow::Result<Self> {
+        let wifi = setup_ap()?;
 
-    let mut http = EspHttpServer::new(&esp_idf_svc::http::server::Configuration {
-        stack_size: STACK_SIZE,
-        uri_match_wildcard: true,
-        ..Default::default()
-    })?;
+        let mut dns = DnsServer::new(IP);
+        dns.start()?;
 
-    let semaphore = Arc::new((Mutex::new(()), Condvar::new()));
-    let semaphore1 = Arc::clone(&semaphore);
+        let mut http = EspHttpServer::new(&esp_idf_svc::http::server::Configuration {
+            stack_size: STACK_SIZE,
+            uri_match_wildcard: true,
+            ..Default::default()
+        })?;
 
-    http.fn_handler::<anyhow::Error, _>("/", Method::Get, |req| {
-        if let Some(req) = check_host_and_log(req)? {
-            match FRONTEND.get_file("index.html") {
-                Some(file) => {
-                    req.into_response(200, None, &[("Content-Type", "text/html")])?
-                        .write_all(file.contents())?;
-                }
-                None => {
-                    req.into_response(404, None, &[])?;
-                }
-            }
-        }
-        Ok(())
-    })?;
+        let finished = Arc::new((Mutex::new(false), Condvar::new()));
+        let finished1 = Arc::clone(&finished);
 
-    http.fn_handler::<anyhow::Error, _>("/login", Method::Post, move |req| {
-        if let Some(mut req) = check_host_and_log(req)? {
-            let body = read_body_to_string(&mut req)?;
-
-            if req.header("Content-Type") == Some("application/x-www-form-urlencoded") {
-                let mut username = None;
-                let mut password = None;
-                for pair in body.split('&') {
-                    let mut pair = pair.split('=');
-                    let key = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
-                    let value = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
-                    let key = urlencoding::decode(key)?;
-                    let value = urlencoding::decode(value)?;
-                    match key.as_ref() {
-                        "username" => username = Some(value),
-                        "password" => password = Some(value),
-                        _ => {}
+        http.fn_handler::<anyhow::Error, _>("/", Method::Get, |req| {
+            if let Some(req) = check_host_and_log(req)? {
+                match FRONTEND.get_file("index.html") {
+                    Some(file) => {
+                        req.into_response(200, None, &[("Content-Type", "text/html")])?
+                            .write_all(file.contents())?;
+                    }
+                    None => {
+                        req.into_response(404, None, &[])?;
                     }
                 }
-                let config = bupt::BuptAccount {
-                    username: username
-                        .ok_or(anyhow::anyhow!("Missing username"))?
-                        .to_string(),
-                    password: password
-                        .ok_or(anyhow::anyhow!("Missing password"))?
-                        .to_string(),
-                };
-                match bupt::login(&config) {
-                    Ok(_) => {
-                        req.into_ok_response()?
-                            .write_all(json!({"code": 0}).to_string().as_bytes())?;
-                        let (_lock, cvar) = &*semaphore1;
-                        crate::nvs::save(super::NetConfig::BuptPortal(config)).map_err(|x| {
-                            log::error!("Failed to save account: {:?} / {}", x, x);
-                            x
-                        })?;
-                        cvar.notify_all();
+            }
+            Ok(())
+        })?;
+
+        http.fn_handler::<anyhow::Error, _>("/login", Method::Post, move |req| {
+            if let Some(mut req) = check_host_and_log(req)? {
+                let body = read_body_to_string(&mut req)?;
+
+                if req.header("Content-Type") == Some("application/x-www-form-urlencoded") {
+                    let mut username = None;
+                    let mut password = None;
+                    for pair in body.split('&') {
+                        let mut pair = pair.split('=');
+                        let key = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
+                        let value = pair.next().ok_or(anyhow::anyhow!("Invalid body"))?;
+                        let key = urlencoding::decode(key)?;
+                        let value = urlencoding::decode(value)?;
+                        match key.as_ref() {
+                            "username" => username = Some(value),
+                            "password" => password = Some(value),
+                            _ => {}
+                        }
                     }
-                    Err(e) => {
-                        req.into_ok_response()?.write_all(
-                            json!({"code": 1, "message": e.to_string()})
-                                .to_string()
-                                .as_bytes(),
-                        )?;
+                    let config = bupt::BuptAccount {
+                        username: username
+                            .ok_or(anyhow::anyhow!("Missing username"))?
+                            .to_string(),
+                        password: password
+                            .ok_or(anyhow::anyhow!("Missing password"))?
+                            .to_string(),
+                    };
+                    match bupt::login(&config) {
+                        Ok(_) => {
+                            req.into_ok_response()?
+                                .write_all(json!({"code": 0}).to_string().as_bytes())?;
+                            let (_lock, cvar) = &*finished1;
+                            crate::nvs::save(super::NetConfig::BuptPortal(config)).map_err(
+                                |x| {
+                                    log::error!("Failed to save account: {:?} / {}", x, x);
+                                    x
+                                },
+                            )?;
+                            cvar.notify_all();
+                        }
+                        Err(e) => {
+                            req.into_ok_response()?.write_all(
+                                json!({"code": 1, "message": e.to_string()})
+                                    .to_string()
+                                    .as_bytes(),
+                            )?;
+                        }
+                    }
+                } else {
+                    log::info!("Invalid Content-Type");
+                    req.into_response(400, None, &[])?;
+                }
+            }
+            Ok(())
+        })?;
+
+        http.fn_handler::<anyhow::Error, _>("*", Method::Get, |req| {
+            if let Some(req) = check_host_and_log(req)? {
+                match FRONTEND.get_file(req.uri().trim_start_matches('/')) {
+                    Some(file) => {
+                        let ext = req.uri().split('.').last().unwrap_or("");
+                        let mime = MIME_TYPES
+                            .iter()
+                            .find(|(ext_, _)| ext == *ext_)
+                            .map(|(_, mime)| *mime)
+                            .unwrap_or("application/octet-stream");
+                        req.into_response(200, None, &[("Content-Type", mime)])?
+                            .write_all(file.contents())?;
+                    }
+                    None => {
+                        req.into_response(404, None, &[])?;
                     }
                 }
-            } else {
-                log::info!("Invalid Content-Type");
-                req.into_response(400, None, &[])?;
+            }
+            Ok(())
+        })?;
+
+        log::info!("Now visit http://{} to login", IP);
+
+        Ok(Self {
+            wifi,
+            dns,
+            finished,
+            http,
+        })
+    }
+
+    pub fn wait(&self) {
+        let (finished, cvar) = &*self.finished;
+        if let Ok(finished) = finished.lock() {
+            if !*finished {
+                drop(cvar.wait(finished).unwrap());
             }
         }
-        Ok(())
-    })?;
-
-    http.fn_handler::<anyhow::Error, _>("*", Method::Get, |req| {
-        if let Some(req) = check_host_and_log(req)? {
-            match FRONTEND.get_file(req.uri().trim_start_matches('/')) {
-                Some(file) => {
-                    let ext = req.uri().split('.').last().unwrap_or("");
-                    let mime = MIME_TYPES
-                        .iter()
-                        .find(|(ext_, _)| ext == *ext_)
-                        .map(|(_, mime)| *mime)
-                        .unwrap_or("application/octet-stream");
-                    req.into_response(200, None, &[("Content-Type", mime)])?
-                        .write_all(file.contents())?;
-                }
-                None => {
-                    req.into_response(404, None, &[])?;
-                }
-            }
-        }
-        Ok(())
-    })?;
-
-    log::info!("Now visit http://{} to login", IP);
-    let (lock, cvar) = &*semaphore;
-    drop(cvar.wait(lock.lock().unwrap()).unwrap());
-
-    Ok(wifi)
+    }
 }
 
 fn setup_ap() -> anyhow::Result<Box<EspWifi<'static>>> {

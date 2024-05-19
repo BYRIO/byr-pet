@@ -149,6 +149,10 @@ pub fn connect() -> Result<Box<EspWifi<'static>>> {
                 EspSystemEventLoop::take()?,
             )
         }
-        None => provisioning::main(),
+        None => {
+            let p = provisioning::Provisioner::new()?;
+            p.wait();
+            Ok(p.wifi)
+        }
     }
 }
