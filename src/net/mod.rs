@@ -27,6 +27,19 @@ fn connect_wifi_with_config(
         NetConfig::NormalWifi(wifi) => (AuthMethod::WPA2Personal, wifi.ssid, wifi.password),
     };
     let mut esp_wifi = EspWifi::new(modem, sysloop.clone(), Some(nvs))?;
+
+    #[cfg(feature = "random_mac")]
+    {
+        use esp_idf_svc::wifi::WifiDeviceId;
+        let mac = generate_random_mac();
+        log::info!("Generated random MAC: {:02X?}", mac);
+        esp_wifi.set_mac(WifiDeviceId::Sta, mac)?;
+        log::info!(
+            "Set MAC address to {:02X?}",
+            esp_wifi.get_mac(WifiDeviceId::Sta)?
+        );
+    }
+
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sysloop)?;
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
@@ -111,6 +124,17 @@ impl fmt::Debug for Wifi {
 enum NetConfig {
     BuptPortal(bupt::BuptAccount),
     NormalWifi(Wifi),
+}
+
+#[cfg(feature = "random_mac")]
+pub fn generate_random_mac() -> [u8; 6] {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let mut mac = [0u8; 6];
+    rng.fill(&mut mac);
+    mac[0] &= 0xFE;
+    mac[0] &= 0xFD;
+    mac
 }
 
 pub fn connect() -> Result<Box<EspWifi<'static>>> {

@@ -13,21 +13,19 @@ use embedded_svc::http::Headers;
 use esp_idf_hal::delay;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
+    hal::prelude::Peripherals,
     http::{
         server::{EspHttpConnection, EspHttpServer, Request},
         Method,
     },
     io::Write,
+    ipv4::{self, RouterConfiguration},
     ipv4::{Mask, Subnet},
+    netif::{EspNetif, NetifConfiguration, NetifStack},
     nvs::EspDefaultNvsPartition,
     wifi::{
         self, AccessPointConfiguration, AuthMethod, BlockingWifi, ClientConfiguration, EspWifi,
     },
-};
-use esp_idf_svc::{
-    hal::prelude::Peripherals,
-    ipv4::{self, RouterConfiguration},
-    netif::{EspNetif, NetifConfiguration, NetifStack},
 };
 
 use include_dir::{include_dir, Dir};
@@ -217,6 +215,18 @@ fn setup_ap() -> anyhow::Result<Box<EspWifi<'static>>> {
         stack: NetifStack::Ap,
         custom_mac: None,
     })?)?;
+
+    #[cfg(feature = "random_mac")]
+    {
+        use esp_idf_svc::wifi::WifiDeviceId;
+        let mac = super::generate_random_mac();
+        log::info!("Generated random MAC: {:02X?}", mac);
+        esp_wifi.set_mac(WifiDeviceId::Sta, mac)?;
+        log::info!(
+            "Set MAC address to {:02X?}",
+            esp_wifi.get_mac(WifiDeviceId::Sta)?
+        );
+    }
 
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sys_loop)?;
 

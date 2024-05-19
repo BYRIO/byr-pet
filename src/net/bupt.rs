@@ -120,7 +120,7 @@ fn auth(account: BuptAccount, cookie: String) -> Result<()> {
                         })
                     },
                 );
-                fatal!("BUPT-portal authentication failed: {}", reason)
+                fatal!("BUPT-portal 认证失败: {}", reason)
             }
         },
         _ => fatal!("unexpected status code: {}", response.status()),
