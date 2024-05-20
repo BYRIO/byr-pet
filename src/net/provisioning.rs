@@ -43,11 +43,7 @@ const CHANNEL: u8 = 11;
 const IP: Ipv4Addr = Ipv4Addr::new(192, 168, 71, 1);
 const IP_STRING: &str = "192.168.71.1";
 
-const MIME_TYPES: &[(&str, &str)] = &[
-    ("html", "text/html"),
-    ("js", "application/javascript"),
-    ("css", "text/css"),
-];
+include!(concat!(env!("OUT_DIR"), "/mime.rs"));
 
 fn read_body_to_string(req: &mut Request<&mut EspHttpConnection>) -> anyhow::Result<String> {
     let mut body = Vec::new();

@@ -51,6 +51,7 @@ embedded-svc = { git = "https://github.com/esp-rs/embedded-svc.git" }
 
 [build-dependencies]
 embuild = "0.31.3"
+mime_guess = "2.0.4"
 
 [dev-dependencies.cargo-husky]
 version = "1"
