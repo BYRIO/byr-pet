@@ -140,6 +140,9 @@ pub fn connect() -> Result<Box<EspWifi<'static>>> {
     set_target_level("wifi", log::LevelFilter::Warn)?;
     set_target_level("wifi_init", log::LevelFilter::Warn)?;
 
+    #[cfg(feature = "clean_nvs")]
+    crate::nvs::remove::<NetConfig>()?;
+
     match crate::nvs::load::<NetConfig>()? {
         Some(config) => {
             log::info!("Loaded NetConfig: {:?}", &config);

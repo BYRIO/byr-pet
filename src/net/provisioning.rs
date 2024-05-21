@@ -109,8 +109,12 @@ impl Provisioner {
             if let Some(req) = check_host_and_log(req)? {
                 match FRONTEND.get_file("index.html") {
                     Some(file) => {
-                        req.into_response(200, None, &[("Content-Type", "text/html")])?
-                            .write_all(file.contents())?;
+                        req.into_response(
+                            200,
+                            None,
+                            &[("Content-Type", "text/html"), ("Content-Encoding", "gzip")],
+                        )?
+                        .write_all(file.contents())?;
                     }
                     None => {
                         req.into_response(404, None, &[])?;
@@ -186,8 +190,12 @@ impl Provisioner {
                             .find(|(ext_, _)| ext == *ext_)
                             .map(|(_, mime)| *mime)
                             .unwrap_or("application/octet-stream");
-                        req.into_response(200, None, &[("Content-Type", mime)])?
-                            .write_all(file.contents())?;
+                        req.into_response(
+                            200,
+                            None,
+                            &[("Content-Type", mime), ("Content-Encoding", "gzip")],
+                        )?
+                        .write_all(file.contents())?;
                     }
                     None => {
                         req.into_response(404, None, &[])?;

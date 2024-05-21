@@ -1,27 +1,37 @@
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use std::collections::HashSet;
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
 
-fn copy_dir(
+fn walk(
     src: impl AsRef<Path>,
     dst: impl AsRef<Path>,
-    mime_types: &mut std::collections::HashSet<(String, String)>,
+    mime_types: &mut HashSet<(String, String)>,
 ) -> io::Result<()> {
     fs::create_dir_all(&dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let ty = entry.file_type()?;
         if ty.is_dir() {
-            copy_dir(
+            walk(
                 entry.path(),
                 dst.as_ref().join(entry.file_name()),
                 mime_types,
             )?;
         } else {
             println!("cargo:rerun-if-changed={}", entry.path().to_str().unwrap());
-            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+
+            let dst_file = dst.as_ref().join(entry.file_name());
+            let input_file = fs::File::open(entry.path())?;
+            let output_file = fs::File::create(&dst_file)?;
+
+            let mut encoder = GzEncoder::new(output_file, Compression::best());
+            io::copy(&mut io::BufReader::new(input_file), &mut encoder)?;
+            encoder.finish()?;
 
             if let Some(ext) = entry.path().extension() {
                 if let Some(ext_str) = ext.to_str() {
@@ -55,8 +65,7 @@ fn main() {
 
     let mut mime_types = std::collections::HashSet::new();
 
-    copy_dir(dist_dir, &out_dist_dir, &mut mime_types)
-        .expect("Failed to copy frontend dist directory");
+    walk(dist_dir, &out_dist_dir, &mut mime_types).expect("Failed to copy frontend dist directory");
 
     let mime_rs_path = Path::new(&out_dir).join("mime.rs");
     let mut file = File::create(mime_rs_path).expect("Failed to create mime.rs file");
