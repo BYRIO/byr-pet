@@ -151,27 +151,32 @@ pub fn connect() -> Result<Box<EspWifi<'static>>> {
     
     let nvs = crate::nvs::nvs();
     match crate::nvs::load::<NetConfig>()? {
-        Some(config) => {//有配置
-            match bupt::check(bupt::CHECK_URL) { //判断是否已经登陆过，如果已经登陆进入第一个块
+        //有配置
+        Some(config) => {
+            //判断是否已经登陆过，如果已经登陆进入第一个块
+            match bupt::check(bupt::CHECK_URL) { 
+                
                 Ok(bupt::BuptNetStatus::Authenticated) => {
-                    let bupt_wifi = EspWifi::new(Peripherals::take()?.modem, EspSystemEventLoop::take()?.clone(), Some(nvs))?;//bupt—portal wifi配置？
+                    let bupt_wifi = EspWifi::new(Peripherals::take()?.modem, EspSystemEventLoop::take()?.clone(), Some(nvs))?;
                     log::info!("BUPT-portal is already authenticated");
                     Ok(Box::new(bupt_wifi))//返回bupt-portal实例
-                }
+                } //bupt—portal wifi配置？
             
-                _ => {//未登录进入第二个块
+                //未登录进入第二个块
+                _ => {
                     log::info!("Loaded NetConfig: {:?}", &config);
-                    let wifi_result = connect_wifi_with_config(//用已经储存的用户名密码登录,如果密码修改，无法登录，需要重新进行配网
+                    let wifi_result = connect_wifi_with_config(
                         config,
                         Peripherals::take()?.modem,
                         EspSystemEventLoop::take()?,
-                    );
+                    ); //用已经储存的用户名密码登录,如果密码修改，无法登录，需要重新进行配网
                     check_error_and_reconnect(wifi_result)
                     
                 }
             }
         }
-        None => {//没有配置
+        //没有配置
+        None => {
             let p = provisioning::Provisioner::new()?;
             p.wait();
             Ok(p.wifi)
