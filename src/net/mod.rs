@@ -72,22 +72,31 @@ fn connect_wifi_with_config(
             log::info!("Retrying...");
         }
     }
-
     log::info!("Waiting for DHCP lease...");
     wifi.wait_netif_up()?;
 
     let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
     log::info!("Wifi DHCP info: {:?}", ip_info);
-
     if let Some(account) = bupt_account {
+
         for retry in 0..10 {
             match bupt::login(&account) {
                 Ok(_) => break,
+                
                 Err(e) => {
-                    log::warn!(
+                    if e.to_string().contains("incorrect password") {
+                        log::error!("Failed to login to BUPT-portal: {}, retrying with new password",
+                        e);
+                        bail!("Failed to login to BUPT-portal because of wrong password");
+                        //密码错误 重新配网
+                        
+                    }
+                    else {
+                        log::warn!(
                         "Failed to login to BUPT-portal: {}, will retry after 10 seconds...",
                         e
-                    );
+                        );
+                    }
                 }
             }
             delay.delay_ms(1000 * 10);
@@ -139,23 +148,51 @@ pub fn generate_random_mac() -> [u8; 6] {
 pub fn connect() -> Result<Box<EspWifi<'static>>> {
     set_target_level("wifi", log::LevelFilter::Warn)?;
     set_target_level("wifi_init", log::LevelFilter::Warn)?;
-
-    #[cfg(feature = "clean_nvs")]
-    crate::nvs::remove::<NetConfig>()?;
-
+    
+    let nvs = crate::nvs::nvs();
     match crate::nvs::load::<NetConfig>()? {
-        Some(config) => {
-            log::info!("Loaded NetConfig: {:?}", &config);
-            connect_wifi_with_config(
-                config,
-                Peripherals::take()?.modem,
-                EspSystemEventLoop::take()?,
-            )
+        Some(config) => {//有配置
+            match bupt::check(bupt::CHECK_URL) { //判断是否已经登陆过，如果已经登陆进入第一个块
+                Ok(bupt::BuptNetStatus::Authenticated) => {
+                    let bupt_wifi = EspWifi::new(Peripherals::take()?.modem, EspSystemEventLoop::take()?.clone(), Some(nvs))?;//bupt—portal wifi配置？
+                    log::info!("BUPT-portal is already authenticated");
+                    Ok(Box::new(bupt_wifi))//返回bupt-portal实例
+                }
+            
+                _ => {//未登录进入第二个块
+                    log::info!("Loaded NetConfig: {:?}", &config);
+                    let wifi_result = connect_wifi_with_config(//用已经储存的用户名密码登录,如果密码修改，无法登录，需要重新进行配网
+                        config,
+                        Peripherals::take()?.modem,
+                        EspSystemEventLoop::take()?,
+                    );
+                    check_error_and_reconnect(wifi_result)
+                    
+                }
+            }
         }
-        None => {
+        None => {//没有配置
             let p = provisioning::Provisioner::new()?;
             p.wait();
             Ok(p.wifi)
+        }
+    }
+}
+
+fn check_error_and_reconnect(result: Result<Box<EspWifi<'static>>>) -> Result<Box<EspWifi<'static>>> {
+    match result {
+        Ok(wifi) => Ok(wifi),
+        Err(e) => {
+            if e.to_string().contains("Failed to login to BUPT-portal because of wrong password") {
+                // 密码错误，读取到返回的错误消息中特定报错，当做没有配置，重新进行配网
+                log::info!("Re-provisioning the network");
+                let new_config = provisioning::Provisioner::new()?;
+                new_config.wait();
+                Ok(new_config.wifi)
+            } else {
+                // 其他错误，直接返回原始错误
+                Err(e)
+            }
         }
     }
 }

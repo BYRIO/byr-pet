@@ -29,14 +29,14 @@ impl fmt::Debug for BuptAccount {
     }
 }
 
-const CHECK_URL: &str = "http://connect.rom.miui.com/generate_204?cmd=redirect&arubalp=12345";
+pub const CHECK_URL: &str = "http://connect.rom.miui.com/generate_204?cmd=redirect&arubalp=12345";
 
-enum BuptNetStatus {
+pub enum BuptNetStatus {
     Authenticated,
     NotAuthenticated(Option<String>),
 }
 
-fn check(url: impl AsRef<str>) -> Result<BuptNetStatus> {
+pub fn check(url: impl AsRef<str>) -> Result<BuptNetStatus> {
     log::debug!("checking bupt network status with url: {}", url.as_ref());
     let connection = EspHttpConnection::new(&Configuration {
         follow_redirects_policy: FollowRedirectsPolicy::FollowNone,
