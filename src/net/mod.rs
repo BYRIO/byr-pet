@@ -93,7 +93,7 @@ fn connect_wifi_with_config(
             delay.delay_ms(1000 * 10);
             if retry == 9 {
                 log::error!("Retry limit exceeded");
-                bail!("Failed to login to BUPT-portal");
+                check_error_and_reconnect(Err(ConnectResult::PasswordError))?;
             } else {
                 log::info!("Retrying...");
             }
@@ -136,26 +136,6 @@ pub fn generate_random_mac() -> [u8; 6] {
     mac
 }
 
-fn check_error_and_reconnect(result: Result<Box<EspWifi<'static>>>) -> Result<Box<EspWifi<'static>>> {
-    match result {
-        Ok(wifi) => Ok(wifi),
-        Err(e) => {
-            // 使用枚举类型进行匹配判断
-            match e {
-                ESP_ERR_HTTP_CONNECT => {
-                    log::info!("Re-provisioning the network");
-                    let new_config = provisioning::Provisioner::new()?;
-                    new_config.wait();
-                    Ok(new_config.wifi)
-                }
-                _ => {
-                    Err(e)
-                }
-            }
-        }
-    }
-}
-
 pub fn connect() -> Result<Box<EspWifi<'static>>> {
     set_target_level("wifi", log::LevelFilter::Warn)?;
     set_target_level("wifi_init", log::LevelFilter::Warn)?;
@@ -166,12 +146,11 @@ pub fn connect() -> Result<Box<EspWifi<'static>>> {
     match crate::nvs::load::<NetConfig>()? {
         Some(config) => {
             log::info!("Loaded NetConfig: {:?}", &config);
-            let wifi_result = connect_wifi_with_config(
+            connect_wifi_with_config(
                 config,
                 Peripherals::take()?.modem,
                 EspSystemEventLoop::take()?,
-            );
-            check_error_and_reconnect(wifi_result)
+            )
         }
         None => {
             let p = provisioning::Provisioner::new()?;
@@ -181,7 +160,47 @@ pub fn connect() -> Result<Box<EspWifi<'static>>> {
     }
 }
 
+// 定义一个枚举来表示连接结果
+#[derive(Debug)]
+enum ConnectResult {
+    PasswordError,
+    OtherError(anyhow::Error),
+}
 
+// 为 ConnectResult 实现 From<anyhow::Error> 特性
+impl From<anyhow::Error> for ConnectResult {
+    fn from(err: anyhow::Error) -> ConnectResult {
+        ConnectResult::OtherError(err)
+    }
+}
 
+// 为 ConnectResult 实现 std::fmt::Display
+impl fmt::Display for ConnectResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConnectResult::PasswordError => write!(f, "Password Error"),
+            ConnectResult::OtherError(err) => write!(f, "{}", err),
+        }
+    }
+}
 
+// 为 ConnectResult 实现 std::error::Error
+impl std::error::Error for ConnectResult {}
 
+// 定义 check_error_and_reconnect 函数
+fn check_error_and_reconnect(
+    result: Result<Box<EspWifi<'static>>, ConnectResult>,
+) -> Result<(), ConnectResult> {
+    match result {
+        Ok(_wifi) => Ok(()),
+        Err(e) => match e {
+            ConnectResult::PasswordError => {
+                log::info!("Re-provisioning the network");
+                let new_config = provisioning::Provisioner::new()?;
+                new_config.wait();
+                Ok(())
+            }
+            ConnectResult::OtherError(err) => Err(ConnectResult::OtherError(err)),
+        },
+    }
+}
